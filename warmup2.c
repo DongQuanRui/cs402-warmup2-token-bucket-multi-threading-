@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <sys/time.h>
@@ -11,17 +12,30 @@
 typedef struct tagPacket{
     int index;
     int token_required;
+    int S_time_read;
+    
+    double statistics_inter_arrival;
+    double Q1_time;
+    double Q2_time;
+    double S_time;
+    double time_in_system;
 }packetElem;
 
 //initialize the global variables for this simulation
 My402List Q1;
 My402List Q2;
 int num_file = 0;
-FILE *fp = NULL;
 int token = 0;
-int total_num_packet = 0;
-int total_num_packet_finished = 0;
+//int total_num_packet = 0;
+int total_num_packet_arrived = 0;
+int total_num_packet_served = 0;
+int total_num_packets_to_server = 0;
+int not_stop = 1;
+FILE *fp = NULL;
+
 pthread_mutex_t IOlock;
+pthread_cond_t Q_not_empty = PTHREAD_COND_INITIALIZER;
+
 
 //initialize default parameters
 int P = 0, num = 0, B = 0;
@@ -39,6 +53,12 @@ double in_Q1_time = 0;
 double in_Q2_time_before = 0;
 double in_Q2_time_after = 0;
 double in_Q2_time = 0;
+double in_S1_time_before = 0;
+double in_S1_time_after = 0;
+double in_S1_time = 0;
+double in_S2_time_before = 0;
+double in_S2_time_after = 0;
+double in_S2_time = 0;
 
 
 double get_wall_time()
@@ -47,7 +67,17 @@ double get_wall_time()
     if (gettimeofday(&time,NULL)){
         return 0;
     }
-    return (double)time.tv_sec + (double)time.tv_usec * .000001;
+    return (double)time.tv_sec * 1000 + (double)time.tv_usec * .001;
+}
+
+void print_time(double proc_time){
+    digit = (int)proc_time;
+    char str_digit[8];
+    sprintf(str_digit, "%d", digit);
+    for (int i=0; i<8-strlen(str_digit); i++) {
+        printf("0");
+    }
+    printf("%.3fms: ", proc_time);
 }
 
 void *packet_proc(void *fp)
@@ -56,72 +86,84 @@ void *packet_proc(void *fp)
     double inter_arrival_time_after = 0;
     double inter_arrival_time = 0;
     
-    while (total_num_packet < num) {
-//    while (1) {
+    //loop
+    while (not_stop) {
+        
+        ///////////////////////////////    Q1    ///////////////////////////////
         //read info from file
         if (!feof(fp)) {
             fscanf(fp, "%d %d %d", &lambda, &P, &mu);
-        }
-        
-        //printf("lambda = %.3f, P = %d, mu= %.3f\n", lambda, P, mu);
-//        printf("lambda = %d, P = %d, mu= %d\n", lambda, P, mu);
-        
-        //sleep for an interval rate = lambda
-        usleep(lambda * 1000);
-        
-        pthread_mutex_lock(&IOlock);
-        //wake up, create a packet object
-        total_num_packet++;
-        
-        //check if packet needs to be dropped
-        //create a packet
-        packetElem *packet = (packetElem *)malloc(sizeof(packetElem));
-        packet->index = total_num_packet;
-        packet->token_required = P;
-        
-        //print time (????????:???ms: )
-        inter_arrival_time_after = get_wall_time();
-        proc_time = inter_arrival_time_after - start_time;
-        digit = (int)proc_time;
-        
-        char str_digit[8];
-        sprintf(str_digit, "%d", digit);
-        for (int i=0; i<8-strlen(str_digit); i++) {
-            printf("0");
-        }
-        printf("%.3fms: ", proc_time);
-        
-        //print (p? arrives, needs ? tokends, inter-arrival time = ?ms)
-        inter_arrival_time = inter_arrival_time_after - inter_arrival_time_before;
-        printf("p%d arrives, need %d tokens, inter-arrival time = ", total_num_packet, P);
-        for (int i=0; i<8-strlen(str_digit); i++) {
-            printf("0");
-        }
-        printf("%.3fms", inter_arrival_time);
-        inter_arrival_time_before = inter_arrival_time_after;
-        
-        if (P <= B) {//if the packet needs to be enqueued
-            printf("\n");
+//            printf("lambda = %.3f, P = %d, mu= %.3f\n", lambda, P, mu);
+//            printf("lambda = %d, P = %d, mu= %d\n", lambda, P, mu);
             
-            //enqueue this packet to Q1
-            My402ListPrepend(&Q1, packet);
-            in_Q1_time_before = get_wall_time();
+            //sleep for an interval rate = lambda
+            usleep(lambda * 1000);
             
-            //print time (????????:???ms: p? enters Q1)
-            proc_time = in_Q1_time_before - start_time;
-            digit = (int)proc_time;
-            sprintf(str_digit, "%d", digit);
-            for (int i=0; i<8-strlen(str_digit); i++) {
-                printf("0");
+            //wake up, create a packet object
+            pthread_mutex_lock(&IOlock);
+            packetElem *packet = (packetElem *)malloc(sizeof(packetElem));
+            total_num_packet_arrived++;
+            packet->index = total_num_packet_arrived;
+            packet->token_required = P;
+            packet->S_time_read = mu;
+            
+
+            //////////////////////////    time    //////////////////////////
+            //print time (????????:???ms: )
+            inter_arrival_time_after = get_wall_time();
+            proc_time = inter_arrival_time_after - start_time;
+            
+            print_time(proc_time);
+//            digit = (int)proc_time;
+//
+//            char str_digit[8];
+//            sprintf(str_digit, "%d", digit);
+//            for (int i=0; i<8-strlen(str_digit); i++) {
+//                printf("0");
+//            }
+//            printf("%.3fms: ", proc_time);
+            
+            //print (p? arrives, needs ? tokends, inter-arrival time = ?ms)
+            inter_arrival_time = inter_arrival_time_after - inter_arrival_time_before;
+            printf("p%d arrives, need %d tokens, inter-arrival time = %.3fms", total_num_packet_arrived, P, inter_arrival_time);
+            inter_arrival_time_before = inter_arrival_time_after;
+            
+            //check if need to drop
+            if (P <= B) {//if the packet needs to be enqueued
+                printf("\n");
+                
+                //enqueue this packet to Q1
+                in_Q1_time_before = get_wall_time();
+                packet->Q1_time = in_Q1_time_before;
+                My402ListPrepend(&Q1, packet);
+                
+                //////////////////////////    time    //////////////////////////
+                //print time (????????:???ms: p? enters Q1)
+                proc_time = in_Q1_time_before - start_time;
+                print_time(proc_time);
+//                digit = (int)proc_time;
+//                sprintf(str_digit, "%d", digit);
+//                for (int i=0; i<8-strlen(str_digit); i++) {
+//                    printf("0");
+//                }
+//                printf("%.3fms: ", proc_time);
+                printf("p%d enters Q1\n", total_num_packet_arrived);
+            }else{//if packet is dropped
+                //print time (, dropped)
+                printf(", dropped\n");
+                total_num_packets_to_server--;
+                //////////////////////////    time    //////////////////////////
             }
-            printf("%.3fms: ", proc_time);
-            printf("p%d enters Q1\n", total_num_packet);
             
-        }else{//if packet is dropped
-            //print time (, dropped)
-            printf(", dropped\n");
+            packet = NULL;
+            free(packet);
+            pthread_mutex_unlock(&IOlock);
         }
-        packet = NULL;
+        ///////////////////////////////    Q1    ///////////////////////////////
+        
+        ///////////////////////////////    Q1->Q2    ///////////////////////////////
+        //managing Q2
+        pthread_mutex_lock(&IOlock);
         
         //check if the packet at the head of Q1 can be moved into Q2
         My402ListElem *temp = NULL;
@@ -132,22 +174,20 @@ void *packet_proc(void *fp)
             continue;
         }
         
-        packet = (packetElem *)(temp->obj);
+        packetElem *packet = (packetElem *)(temp->obj);
         if (packet->token_required <= token) {
             My402ListUnlink(&Q1, temp);
-//            printf("There are %d packets in Q1 now\n", My402ListLength(&Q1));
             token = token - packet->token_required;
             
+            //////////////////////////    time    //////////////////////////
             //print time (????????:???ms: )
             in_Q1_time_after = get_wall_time();
-            in_Q1_time = in_Q1_time_after - in_Q1_time_before;
+            in_Q1_time = in_Q1_time_after - packet->Q1_time;//_before;
             
             proc_time = get_wall_time() - start_time;
             digit = (int)proc_time;
-            
             char str_digit[8];
             sprintf(str_digit, "%d", digit);
-//            printf("In packet_proc now!\n");
             for (int i=0; i<8-strlen(str_digit); i++) {
                 printf("0");
             }
@@ -159,11 +199,15 @@ void *packet_proc(void *fp)
             }else{
                 printf("P%d leaves Q1, time in Q1 = %.3fms, token bucket now has %d tokens\n", packet->index, in_Q1_time, token);
             }
+            packet->Q1_time = in_Q1_time;
+            //////////////////////////    time    //////////////////////////
             
             //packet enters Q2
-            My402ListPrepend(&Q2, temp);
             in_Q2_time_before = get_wall_time();
+            packet->Q2_time = in_Q2_time_before;
+            My402ListPrepend(&Q2, packet);
             
+            //////////////////////////    time    //////////////////////////
             //print time(????????:???ms: p? enters Q2)
             proc_time = in_Q2_time_before - start_time;
             digit = (int)proc_time;
@@ -172,14 +216,15 @@ void *packet_proc(void *fp)
                 printf("0");
             }
             printf("%.3fms: ", proc_time);
-            printf("p%d enters Q2\n", total_num_packet);
+            printf("p%d enters Q2\n", total_num_packet_arrived);
             
-//            total_num_packet_finished++;
+            //broadcast the not empty signal to 2 servers
+            if (!My402ListEmpty(&Q2)) {
+                pthread_cond_broadcast(&Q_not_empty);
+            }
             
-//            if (My402ListEmpty(&Q1)) {
-//                pthread_mutex_unlock(&IOlock);
-//                break;
-//            }
+            //////////////////////////    time    //////////////////////////
+            ///////////////////////////////    Q1->Q2    ///////////////////////////////
         }
         packet = NULL;
         free(packet);
@@ -193,16 +238,18 @@ void *packet_proc(void *fp)
 void *token_proc()
 {
     int total_num_token = 0;
-
-    while (total_num_packet < num) {
-//    while (1) {
+    
+    while (not_stop) {
+        
+        ///////////////////////////////    token    ///////////////////////////////
         //sleep for an interval (rate r)
         usleep(r * 1000000);
         
-        //wake up
+        //wake up and create a token
         pthread_mutex_lock(&IOlock);
         total_num_token++;
         
+        //////////////////////////    time    //////////////////////////
         //print time (????????:???ms: )
         proc_time = get_wall_time() - start_time;
         digit = (int)proc_time;
@@ -213,7 +260,7 @@ void *token_proc()
         }
         printf("%.3fms: ", proc_time);
         
-        //
+        //check if token bucket full or not
         if(token < B) {//if token bucket is not full, increment token count
             token++;
             //print time (token t? arrives, tokens bucket now has ? token)
@@ -223,9 +270,17 @@ void *token_proc()
                 printf("token t%d arrives, token bucket now has %d tokens\n", total_num_token, token);
             }
         }else{//if token bucket is not full, increment token count
-            //print time (????????:???ms: token t? arrives, dropped)
+            //print time (token t? arrives, dropped)
             printf("token t%d arrives, dropped\n", total_num_token);
         }
+        //////////////////////////    time    //////////////////////////
+        
+        pthread_mutex_unlock(&IOlock);
+        ///////////////////////////////    token    ///////////////////////////////
+        
+        
+        ///////////////////////////////    Q1->Q2    ///////////////////////////////
+        pthread_mutex_lock(&IOlock);
         
         //check if token thread can move one packet from Q1 to Q2
         My402ListElem *temp = NULL;
@@ -237,15 +292,19 @@ void *token_proc()
         }
         
         packetElem *packet = (packetElem *)(temp->obj);
+        
         if (packet->token_required <= token) {//if packet can be moved from Q1 to Q2
+            
+            //pop this packet from Q1
             My402ListUnlink(&Q1, temp);
             token = token - packet->token_required;
             
-            //print time(????????:???ms: p? leaves Q1, time in Q1 = ?ms, token bucket now has ? token)
+            //////////////////////////    time    //////////////////////////
+            //print time(????????:???ms: )
             in_Q1_time_after = get_wall_time();
-            in_Q1_time = in_Q1_time_after - in_Q1_time_before;
+            in_Q1_time = in_Q1_time_after - packet->Q1_time;//_before;
             
-            proc_time = get_wall_time() - start_time;
+            proc_time = in_Q1_time_after - start_time;
             digit = (int)proc_time;
             char str_digit[8];
             sprintf(str_digit, "%d", digit);
@@ -254,17 +313,22 @@ void *token_proc()
             }
             printf("%.3fms: ", proc_time);
             
+            //print time(p? leaves Q1, time in Q1 = ?ms, token bucket now has ? token)
             if (token <= 1) {
                 printf("P%d leaves Q1, time in Q1 = %.3fms, token bucket now has %d token\n", packet->index, in_Q1_time, token);
             }else{
                 printf("P%d leaves Q1, time in Q1 = %.3fms, token bucket now has %d tokens\n", packet->index, in_Q1_time, token);
             }
+            packet->Q1_time = in_Q1_time;
+            //////////////////////////    time    //////////////////////////
             
             //packet enters Q2
-            My402ListPrepend(&Q2, temp);
             in_Q2_time_before = get_wall_time();
+            packet->Q2_time = in_Q2_time_before;
+            My402ListPrepend(&Q2, packet);
             
-            //print time(????????:???ms: p? enters Q2)
+            //////////////////////////    time    //////////////////////////
+            //print time(????????:???ms:)
             proc_time = in_Q2_time_before - start_time;
             digit = (int)proc_time;
             sprintf(str_digit, "%d", digit);
@@ -272,30 +336,232 @@ void *token_proc()
                 printf("0");
             }
             printf("%.3fms: ", proc_time);
+            
+            //print time(p? enters Q2)
             printf("p%d enters Q2\n", packet->index);
-            }
-        
-//        total_num_packet_finished++;
-//        if (total_num_packet_finished == num) {
-//            printf("%d\n", total_num_packet_finished);
-//            pthread_mutex_unlock(&IOlock);
-//            break;
-//        }
-        /////////
-        
-        /////////
+            //////////////////////////    time    //////////////////////////
+            
+            pthread_cond_broadcast(&Q_not_empty);
+        }
+        ///////////////////////////////    Q1->Q2    ///////////////////////////////
         
         pthread_mutex_unlock(&IOlock);
+        
     }
     pthread_exit(NULL);
 }
 
-void *server1_proc(void *end_time){
+void *server1_proc(){
+    //loop: When not all the packets are processed
+    while (not_stop) {
+        ///////////////////////////////    before in S    ///////////////////////////////
+        pthread_mutex_lock(&IOlock);
+        
+        while (My402ListEmpty(&Q2)) {
+            if (!not_stop) {
+                break;
+            }
+            pthread_cond_wait(&Q_not_empty, &IOlock);
+        }
+        
+        //take the head packet in Q2 in either S1 or S2
+        My402ListElem *temp = NULL;
+        if (!My402ListEmpty(&Q2)) {
+            temp = My402ListLast(&Q2);
+        }else{
+            pthread_mutex_unlock(&IOlock);
+            continue;
+        }
+        
+        packetElem *packet = (packetElem *)(temp->obj);
+        
+        My402ListUnlink(&Q2, temp);
+        
+        //////////////////////////    time    //////////////////////////
+        //print time(????????:???ms: )
+        in_Q2_time_after = get_wall_time();
+        in_Q2_time = in_Q2_time_after - in_Q2_time_before;
+        
+        proc_time = in_Q2_time_after - start_time;
+        digit = (int)proc_time;
+        char str_digit[8];
+        sprintf(str_digit, "%d", digit);
+        for (int i=0; i<8-strlen(str_digit); i++) {
+            printf("0");
+        }
+        printf("%.3fms: ", proc_time);
+        
+        //print time(p? leaves Q2, time in Q2 = ?ms)
+        printf("P%d leaves Q2, time in Q2 = %.3fms\n", packet->index, in_Q2_time);
+        packet->Q2_time = in_Q2_time;
+        //////////////////////////    time    //////////////////////////
+        
+        ///////////////////////////////    Q2->S1    ///////////////////////////////
+        //packet enters S1
+        in_S1_time_before = get_wall_time();
+        packet->S_time = in_S1_time_before;
+        
+        //////////////////////////    time    //////////////////////////
+        //print time(????????:???ms:)
+        proc_time = in_S1_time_before - start_time;
+        digit = (int)proc_time;
+        sprintf(str_digit, "%d", digit);
+        for (int i=0; i<8-strlen(str_digit); i++) {
+            printf("0");
+        }
+        printf("%.3fms: ", proc_time);
+        
+        //print time(p? enters S1)
+        printf("p%d begins service at S1, requesting %dms of service\n", packet->index, (int)(packet->S_time_read));
+        //////////////////////////    time    //////////////////////////
+        
+        pthread_mutex_unlock(&IOlock);
+        ///////////////////////////////    before in S    ///////////////////////////////
+        
+        //sleep (served in S)
+        usleep(1000 * packet->S_time_read);
+        
+        ///////////////////////////////    Q2->S1    ///////////////////////////////
+        pthread_mutex_lock(&IOlock);
+        
+        in_S1_time_after = get_wall_time();
+        packet->S_time = in_S1_time_after - packet->S_time;
+        packet->time_in_system = packet->Q1_time + packet->Q2_time + packet->S_time;
+        //////////////////////////    time    //////////////////////////
+        //print time(????????:???ms:)
+        proc_time = in_S1_time_after - start_time;
+        digit = (int)proc_time;
+        sprintf(str_digit, "%d", digit);
+        for (int i=0; i<8-strlen(str_digit); i++) {
+            printf("0");
+        }
+        printf("%.3fms: ", proc_time);
+        
+        printf("p%d departs from S1, service time = %.3fms, time in system = %.3fms\n", packet->index, packet->S_time, packet->time_in_system);
+        total_num_packet_served++;
+        //////////////////////////    time    //////////////////////////
+        
+        //termination condition
+        if (total_num_packet_served == total_num_packets_to_server) {
+            not_stop = 0;
+            pthread_cond_signal(&Q_not_empty);
+            pthread_mutex_unlock(&IOlock);
+            break;
+        }
+        
+        pthread_mutex_unlock(&IOlock);
+        ///////////////////////////////    Q2->S1    ///////////////////////////////
+        
+    }
     
     pthread_exit(NULL);
 }
 
-void *server2_proc(void *end_time){
+void *server2_proc(){
+    
+    //loop: When not all the packets are processed
+    pthread_mutex_lock(&IOlock);
+    while (not_stop) {
+        pthread_mutex_unlock(&IOlock);
+        ///////////////////////////////    before in S    ///////////////////////////////
+        pthread_mutex_lock(&IOlock);
+        
+        while (My402ListEmpty(&Q2)) {
+            if (!not_stop) {
+                break;
+            }
+            pthread_cond_wait(&Q_not_empty, &IOlock);
+        }
+        
+        //take the head packet in Q2 in either S1 or S2
+        My402ListElem *temp = NULL;
+        if (!My402ListEmpty(&Q2)) {
+            temp = My402ListLast(&Q2);
+        }else{
+            pthread_mutex_unlock(&IOlock);
+            continue;
+        }
+        
+        packetElem *packet = (packetElem *)(temp->obj);
+        
+        My402ListUnlink(&Q2, temp);
+        
+        //////////////////////////    time    //////////////////////////
+        //print time(????????:???ms: )
+        in_Q2_time_after = get_wall_time();
+        in_Q2_time = in_Q2_time_after - in_Q2_time_before;
+        
+        proc_time = in_Q2_time_after - start_time;
+        digit = (int)proc_time;
+        char str_digit[8];
+        sprintf(str_digit, "%d", digit);
+        for (int i=0; i<8-strlen(str_digit); i++) {
+            printf("0");
+        }
+        printf("%.3fms: ", proc_time);
+        
+        //print time(p? leaves Q2, time in Q2 = ?ms)
+        printf("P%d leaves Q2, time in Q2 = %.3fms\n", packet->index, in_Q2_time);
+        packet->Q2_time = in_Q2_time;
+        //////////////////////////    time    //////////////////////////
+        
+        
+        ///////////////////////////////    Q2->S2    ///////////////////////////////
+        //packet enters S2
+        in_S2_time_before = get_wall_time();
+        packet->S_time = in_S2_time_before;
+        
+        //////////////////////////    time    //////////////////////////
+        //print time(????????:???ms:)
+        proc_time = in_S2_time_before - start_time;
+        digit = (int)proc_time;
+        sprintf(str_digit, "%d", digit);
+        for (int i=0; i<8-strlen(str_digit); i++) {
+            printf("0");
+        }
+        printf("%.3fms: ", proc_time);
+        
+        //print time(p? begins service at S2, requesting ?msm of service)
+        printf("p%d begins service at S2, requesting %dms of service\n", packet->index, (int)(packet->S_time_read));
+        //////////////////////////    time    //////////////////////////
+        
+        pthread_mutex_unlock(&IOlock);
+        ///////////////////////////////    before in S    ///////////////////////////////
+        
+        //sleep (served in S)
+        usleep(1000 * packet->S_time_read);
+        
+        ///////////////////////////////    after in S    ///////////////////////////////
+        pthread_mutex_lock(&IOlock);
+        
+        in_S2_time_after = get_wall_time();
+        packet->S_time =  in_S2_time_after - packet->S_time;
+        packet->time_in_system = packet->Q1_time + packet->Q2_time + packet->S_time;
+        //////////////////////////    time    //////////////////////////
+        //print time(????????:???ms:)
+        proc_time = in_S2_time_after - start_time;
+        digit = (int)proc_time;
+        sprintf(str_digit, "%d", digit);
+        for (int i=0; i<8-strlen(str_digit); i++) {
+            printf("0");
+        }
+        printf("%.3fms: ", proc_time);
+        
+        printf("p%d departs from S2, service time = %.3fms, time in system = %.3fms\n", packet->index, packet->S_time, packet->time_in_system);
+        total_num_packet_served++;
+        //////////////////////////    time    //////////////////////////
+        
+        //termination condition
+        if (total_num_packet_served == total_num_packets_to_server) {
+            not_stop = 0;
+            pthread_cond_signal(&Q_not_empty);
+            pthread_mutex_unlock(&IOlock);
+            break;
+        }
+        
+        pthread_mutex_unlock(&IOlock);
+        ///////////////////////////////    after in S    ///////////////////////////////
+    }
     
     pthread_exit(NULL);
 }
@@ -411,16 +677,16 @@ int main (int argc, char *argv[])
         if (num_B == 0)
             B = 10;
         if (num_num == 0)
-            num = 20;
+            num = 1;
     }else{
         //read file
         fscanf(fp, "%d", &num);
+        total_num_packets_to_server = num;
         printf("num of packet read is: %d\n", num);
         if (num_r == 0)
             r = 1.5;
         if (num_B == 0)
             B = 10;
-//        printf("rrrrrrrrrrrrrrrrrrrrrr = %d\n", r);
 //        fclose(fp);
     }
     
@@ -439,7 +705,6 @@ int main (int argc, char *argv[])
     }
     printf("\n");
     
-    
     //intialize the simulation(global varialbes, etc)
     memset(&Q1, 0, sizeof(My402List));
     memset(&Q2, 0, sizeof(My402List));
@@ -448,7 +713,7 @@ int main (int argc, char *argv[])
     
     //Emulation begin
     start_time = get_wall_time();
-    proc_time = get_wall_time() - start_time;
+    proc_time = start_time - start_time;
     digit = (int)proc_time;
     char str_digit[8];
     sprintf(str_digit, "%d", digit);
@@ -458,15 +723,15 @@ int main (int argc, char *argv[])
     printf("%.3fms: emulation begins\n", proc_time);
     
     //create 4 threads
-    pthread_t packet_thread, token_thread;// server1_thread, server2_thread;
+    pthread_t packet_thread, token_thread, server1_thread, server2_thread;
 
     //packet arrival thread
     pthread_create(&packet_thread, NULL, packet_proc, (void *) fp);
     //token deposting thread
     pthread_create(&token_thread, NULL, token_proc, NULL);
     //server thread
-//    pthread_create(&server1_thread, NULL, producer, (void *) (int) i);
-//    pthread_create(&server2_thread, NULL, producer, (void *) (int) i);
+    pthread_create(&server1_thread, NULL, server1_proc, NULL);
+    pthread_create(&server2_thread, NULL, server2_proc, NULL);
     
     ////////////////////////////////////////////////////////////////////////////////////
     
@@ -474,17 +739,26 @@ int main (int argc, char *argv[])
     ////////////////////////////////////////////////////////////////////////////////////
     
     //wait for thread to end
+//    if(pthread_join(packet_thread, NULL) == 0){
+//        printf("packet thread terminates\n");
+//    }
+//    if(pthread_join(token_thread, NULL) == 0){
+//        printf("token thread terminates\n");
+//    }
+//    if (pthread_join(server1_thread, NULL) == 0) {
+//        printf("server1 terminates\n");
+//    }
+//    if (pthread_join(server2_thread, NULL) == 0) {
+//        printf("server2 terminates\n");
+//    }
     pthread_join(packet_thread, NULL);
     pthread_join(token_thread, NULL);
-//    pthread_join(server1_thread, NULL);
-//    pthread_join(server2_thread, NULL);
-    
-    
+    pthread_join(server1_thread, NULL);
+    pthread_join(server2_thread, NULL);
     
     //print time(????????.???ms: emulation ends)
     proc_time = get_wall_time() - start_time;
     digit = (int)proc_time;
-    
     str_digit[8];
     sprintf(str_digit, "%d", digit);
     for (int i=0; i<8-strlen(str_digit); i++) {
@@ -494,9 +768,5 @@ int main (int argc, char *argv[])
     
     return 0;
 }
-
-
-
-
 
 
