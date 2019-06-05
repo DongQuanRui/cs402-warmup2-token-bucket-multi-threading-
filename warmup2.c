@@ -29,7 +29,7 @@ int token = 0;
 //int total_num_packet = 0;
 int total_num_packet_arrived = 0;
 int total_num_packet_served = 0;
-int total_num_packets_to_server = 0;
+int total_num_packets_to_serve = 0;
 int not_stop = 1;
 FILE *fp = NULL;
 
@@ -88,26 +88,35 @@ void *packet_proc(void *fp)
     
     //loop
     while (not_stop) {
-        
+//        printf("Hello\n");
         ///////////////////////////////    Q1    ///////////////////////////////
         //read info from file
-        if (!feof(fp)) {
+        if (num_file == 1) {
             fscanf(fp, "%lf %d %lf", &lambda, &P, &mu);
-            printf("lambda = %.3f, P = %d, mu= %.3f\n", lambda, P, mu);
-//            printf("lambda = %d, P = %d, mu= %d\n", lambda, P, mu);
-            
+            total_num_packet_arrived++;
+//            printf("lambda = %.3f, P = %d, mu= %.3f\n", lambda, P, mu);
+        }else{
+            total_num_packet_arrived++;
+            if (total_num_packet_arrived == 1) {
+                lambda = lambda * 1000;
+                mu = mu * 1000;
+            }
+        }
+        
+        if (total_num_packet_arrived <= num) {
+//            printf("total num packets arrived: %d   num: %d\n", total_num_packet_arrived, num);
             //sleep for an interval rate = lambda
             usleep(lambda * 1000);
             
             //wake up, create a packet object
             pthread_mutex_lock(&IOlock);
             packetElem *packet = (packetElem *)malloc(sizeof(packetElem));
-            total_num_packet_arrived++;
+//            printf("Packet created!\n");
+            
             packet->index = total_num_packet_arrived;
             packet->token_required = P;
             packet->S_time_read = mu;
             
-
             //////////////////////////    time    //////////////////////////
             //print time (????????:???ms: )
             inter_arrival_time_after = get_wall_time();
@@ -137,10 +146,9 @@ void *packet_proc(void *fp)
             }else{//if packet is dropped
                 //print time (, dropped)
                 printf(", dropped\n");
-                total_num_packets_to_server--;
+                total_num_packets_to_serve--;
                 //////////////////////////    time    //////////////////////////
             }
-            
             packet = NULL;
             free(packet);
             pthread_mutex_unlock(&IOlock);
@@ -168,7 +176,7 @@ void *packet_proc(void *fp)
             //////////////////////////    time    //////////////////////////
             //print time (????????:???ms: )
             in_Q1_time_after = get_wall_time();
-            in_Q1_time = in_Q1_time_after - packet->Q1_time;//_before;
+            in_Q1_time = in_Q1_time_after - packet->Q1_time;
             
             proc_time = get_wall_time() - start_time;
             print_time(proc_time);
@@ -193,13 +201,12 @@ void *packet_proc(void *fp)
             print_time(proc_time);
             
             printf("p%d enters Q2\n", total_num_packet_arrived);
+            //////////////////////////    time    //////////////////////////
             
             //broadcast the not empty signal to 2 servers
             if (!My402ListEmpty(&Q2)) {
                 pthread_cond_broadcast(&Q_not_empty);
             }
-            
-            //////////////////////////    time    //////////////////////////
             ///////////////////////////////    Q1->Q2    ///////////////////////////////
         }
         packet = NULL;
@@ -210,13 +217,11 @@ void *packet_proc(void *fp)
     pthread_exit(NULL);
 }
 
-
 void *token_proc()
 {
     int total_num_token = 0;
     
     while (not_stop) {
-        
         ///////////////////////////////    token    ///////////////////////////////
         //sleep for an interval (rate r)
         usleep(r * 1000000);
@@ -244,10 +249,8 @@ void *token_proc()
             printf("token t%d arrives, dropped\n", total_num_token);
         }
         //////////////////////////    time    //////////////////////////
-        
         pthread_mutex_unlock(&IOlock);
         ///////////////////////////////    token    ///////////////////////////////
-        
         
         ///////////////////////////////    Q1->Q2    ///////////////////////////////
         pthread_mutex_lock(&IOlock);
@@ -262,7 +265,6 @@ void *token_proc()
         }
         
         packetElem *packet = (packetElem *)(temp->obj);
-        
         if (packet->token_required <= token) {//if packet can be moved from Q1 to Q2
             
             //pop this packet from Q1
@@ -303,9 +305,7 @@ void *token_proc()
             pthread_cond_broadcast(&Q_not_empty);
         }
         ///////////////////////////////    Q1->Q2    ///////////////////////////////
-        
         pthread_mutex_unlock(&IOlock);
-        
     }
     pthread_exit(NULL);
 }
@@ -315,7 +315,6 @@ void *server1_proc(){
     while (not_stop) {
         ///////////////////////////////    before in S    ///////////////////////////////
         pthread_mutex_lock(&IOlock);
-        
         while (My402ListEmpty(&Q2)) {
             if (!not_stop) {
                 break;
@@ -333,7 +332,6 @@ void *server1_proc(){
         }
         
         packetElem *packet = (packetElem *)(temp->obj);
-        
         My402ListUnlink(&Q2, temp);
         
         //////////////////////////    time    //////////////////////////
@@ -385,27 +383,23 @@ void *server1_proc(){
         //////////////////////////    time    //////////////////////////
         
         //termination condition
-        if (total_num_packet_served == total_num_packets_to_server) {
+//        printf("In server1, total num packets served is: %d, total num packet to serve is: %d\n", total_num_packet_served, total_num_packets_to_serve);
+        if (total_num_packet_served == total_num_packets_to_serve) {
+//            printf("server1 prepare to terminate\n");
             not_stop = 0;
             pthread_cond_signal(&Q_not_empty);
             pthread_mutex_unlock(&IOlock);
             break;
         }
-        
         pthread_mutex_unlock(&IOlock);
         ///////////////////////////////    Q2->S1    ///////////////////////////////
-        
     }
-    
     pthread_exit(NULL);
 }
 
 void *server2_proc(){
-    
     //loop: When not all the packets are processed
-    pthread_mutex_lock(&IOlock);
     while (not_stop) {
-        pthread_mutex_unlock(&IOlock);
         ///////////////////////////////    before in S    ///////////////////////////////
         pthread_mutex_lock(&IOlock);
         
@@ -424,11 +418,8 @@ void *server2_proc(){
             pthread_mutex_unlock(&IOlock);
             continue;
         }
-        
         packetElem *packet = (packetElem *)(temp->obj);
-        
         My402ListUnlink(&Q2, temp);
-        
         //////////////////////////    time    //////////////////////////
         //print time(????????:???ms: )
         in_Q2_time_after = get_wall_time();
@@ -441,7 +432,6 @@ void *server2_proc(){
         printf("P%d leaves Q2, time in Q2 = %.3fms\n", packet->index, in_Q2_time);
         packet->Q2_time = in_Q2_time;
         //////////////////////////    time    //////////////////////////
-        
         
         ///////////////////////////////    Q2->S2    ///////////////////////////////
         //packet enters S2
@@ -479,7 +469,8 @@ void *server2_proc(){
         //////////////////////////    time    //////////////////////////
         
         //termination condition
-        if (total_num_packet_served == total_num_packets_to_server) {
+//        printf("In server2, total num packets served is: %d, total num packet to serve is: %d\n", total_num_packet_served, total_num_packets_to_serve);
+        if (total_num_packet_served == total_num_packets_to_serve) {
             not_stop = 0;
             pthread_cond_signal(&Q_not_empty);
             pthread_mutex_unlock(&IOlock);
@@ -489,7 +480,6 @@ void *server2_proc(){
         pthread_mutex_unlock(&IOlock);
         ///////////////////////////////    after in S    ///////////////////////////////
     }
-    
     pthread_exit(NULL);
 }
 
@@ -593,23 +583,24 @@ int main (int argc, char *argv[])
     
     //default value of parameters
     if (num_file == 0) {
-        printf("default mode\n");
+//        printf("default mode\n");
         if (num_lambda == 0)
-            lambda = 1.00 *1000;
+            lambda = 1.0;
         if (num_mu == 0)
             mu = 0.35;
         if (num_r == 0)
-            r = 1.5 * 1000;
+            r = 1.5;
         if (num_P == 0)
             P = 3;
         if (num_B == 0)
             B = 10;
         if (num_num == 0)
             num = 1;
+        total_num_packets_to_serve = num;
     }else{
         //read file
         fscanf(fp, "%d", &num);
-        total_num_packets_to_server = num;
+        total_num_packets_to_serve = num;
         printf("num of packet read is: %d\n", num);
         if (num_r == 0)
             r = 1.5;
