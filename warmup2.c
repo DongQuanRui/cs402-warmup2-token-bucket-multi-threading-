@@ -39,8 +39,8 @@ pthread_cond_t Q_not_empty = PTHREAD_COND_INITIALIZER;
 
 //initialize default parameters
 int P = 0, num = 0, B = 0;
-//double lambda = 0.00, mu = 0.00, r = 0.00;
-int lambda = 0, mu = 0,  r = 0;
+double lambda = 0.00, mu = 0.00, r = 0.00;
+//int lambda = 0, mu = 0,  r = 0;
 
 //time processing
 double start_time = 0;
@@ -92,8 +92,8 @@ void *packet_proc(void *fp)
         ///////////////////////////////    Q1    ///////////////////////////////
         //read info from file
         if (!feof(fp)) {
-            fscanf(fp, "%d %d %d", &lambda, &P, &mu);
-//            printf("lambda = %.3f, P = %d, mu= %.3f\n", lambda, P, mu);
+            fscanf(fp, "%lf %d %lf", &lambda, &P, &mu);
+            printf("lambda = %.3f, P = %d, mu= %.3f\n", lambda, P, mu);
 //            printf("lambda = %d, P = %d, mu= %d\n", lambda, P, mu);
             
             //sleep for an interval rate = lambda
@@ -114,14 +114,6 @@ void *packet_proc(void *fp)
             proc_time = inter_arrival_time_after - start_time;
             
             print_time(proc_time);
-//            digit = (int)proc_time;
-//
-//            char str_digit[8];
-//            sprintf(str_digit, "%d", digit);
-//            for (int i=0; i<8-strlen(str_digit); i++) {
-//                printf("0");
-//            }
-//            printf("%.3fms: ", proc_time);
             
             //print (p? arrives, needs ? tokends, inter-arrival time = ?ms)
             inter_arrival_time = inter_arrival_time_after - inter_arrival_time_before;
@@ -141,12 +133,6 @@ void *packet_proc(void *fp)
                 //print time (????????:???ms: p? enters Q1)
                 proc_time = in_Q1_time_before - start_time;
                 print_time(proc_time);
-//                digit = (int)proc_time;
-//                sprintf(str_digit, "%d", digit);
-//                for (int i=0; i<8-strlen(str_digit); i++) {
-//                    printf("0");
-//                }
-//                printf("%.3fms: ", proc_time);
                 printf("p%d enters Q1\n", total_num_packet_arrived);
             }else{//if packet is dropped
                 //print time (, dropped)
@@ -185,13 +171,7 @@ void *packet_proc(void *fp)
             in_Q1_time = in_Q1_time_after - packet->Q1_time;//_before;
             
             proc_time = get_wall_time() - start_time;
-            digit = (int)proc_time;
-            char str_digit[8];
-            sprintf(str_digit, "%d", digit);
-            for (int i=0; i<8-strlen(str_digit); i++) {
-                printf("0");
-            }
-            printf("%.3fms: ", proc_time);
+            print_time(proc_time);
             
             //print time (p? leaves Q1, time in Q1 = ?ms, token bucket now has ? token)
             if (token <= 1) {
@@ -210,12 +190,8 @@ void *packet_proc(void *fp)
             //////////////////////////    time    //////////////////////////
             //print time(????????:???ms: p? enters Q2)
             proc_time = in_Q2_time_before - start_time;
-            digit = (int)proc_time;
-            sprintf(str_digit, "%d", digit);
-            for (int i=0; i<8-strlen(str_digit); i++) {
-                printf("0");
-            }
-            printf("%.3fms: ", proc_time);
+            print_time(proc_time);
+            
             printf("p%d enters Q2\n", total_num_packet_arrived);
             
             //broadcast the not empty signal to 2 servers
@@ -252,13 +228,7 @@ void *token_proc()
         //////////////////////////    time    //////////////////////////
         //print time (????????:???ms: )
         proc_time = get_wall_time() - start_time;
-        digit = (int)proc_time;
-        char str_digit[8];
-        sprintf(str_digit, "%d", digit);
-        for (int i=0; i<8-strlen(str_digit); i++) {
-            printf("0");
-        }
-        printf("%.3fms: ", proc_time);
+        print_time(proc_time);
         
         //check if token bucket full or not
         if(token < B) {//if token bucket is not full, increment token count
@@ -305,13 +275,7 @@ void *token_proc()
             in_Q1_time = in_Q1_time_after - packet->Q1_time;//_before;
             
             proc_time = in_Q1_time_after - start_time;
-            digit = (int)proc_time;
-            char str_digit[8];
-            sprintf(str_digit, "%d", digit);
-            for (int i=0; i<8-strlen(str_digit); i++) {
-                printf("0");
-            }
-            printf("%.3fms: ", proc_time);
+            print_time(proc_time);
             
             //print time(p? leaves Q1, time in Q1 = ?ms, token bucket now has ? token)
             if (token <= 1) {
@@ -330,12 +294,7 @@ void *token_proc()
             //////////////////////////    time    //////////////////////////
             //print time(????????:???ms:)
             proc_time = in_Q2_time_before - start_time;
-            digit = (int)proc_time;
-            sprintf(str_digit, "%d", digit);
-            for (int i=0; i<8-strlen(str_digit); i++) {
-                printf("0");
-            }
-            printf("%.3fms: ", proc_time);
+            print_time(proc_time);
             
             //print time(p? enters Q2)
             printf("p%d enters Q2\n", packet->index);
@@ -383,13 +342,7 @@ void *server1_proc(){
         in_Q2_time = in_Q2_time_after - in_Q2_time_before;
         
         proc_time = in_Q2_time_after - start_time;
-        digit = (int)proc_time;
-        char str_digit[8];
-        sprintf(str_digit, "%d", digit);
-        for (int i=0; i<8-strlen(str_digit); i++) {
-            printf("0");
-        }
-        printf("%.3fms: ", proc_time);
+        print_time(proc_time);
         
         //print time(p? leaves Q2, time in Q2 = ?ms)
         printf("P%d leaves Q2, time in Q2 = %.3fms\n", packet->index, in_Q2_time);
@@ -404,12 +357,7 @@ void *server1_proc(){
         //////////////////////////    time    //////////////////////////
         //print time(????????:???ms:)
         proc_time = in_S1_time_before - start_time;
-        digit = (int)proc_time;
-        sprintf(str_digit, "%d", digit);
-        for (int i=0; i<8-strlen(str_digit); i++) {
-            printf("0");
-        }
-        printf("%.3fms: ", proc_time);
+        print_time(proc_time);
         
         //print time(p? enters S1)
         printf("p%d begins service at S1, requesting %dms of service\n", packet->index, (int)(packet->S_time_read));
@@ -430,12 +378,7 @@ void *server1_proc(){
         //////////////////////////    time    //////////////////////////
         //print time(????????:???ms:)
         proc_time = in_S1_time_after - start_time;
-        digit = (int)proc_time;
-        sprintf(str_digit, "%d", digit);
-        for (int i=0; i<8-strlen(str_digit); i++) {
-            printf("0");
-        }
-        printf("%.3fms: ", proc_time);
+        print_time(proc_time);
         
         printf("p%d departs from S1, service time = %.3fms, time in system = %.3fms\n", packet->index, packet->S_time, packet->time_in_system);
         total_num_packet_served++;
@@ -492,13 +435,7 @@ void *server2_proc(){
         in_Q2_time = in_Q2_time_after - in_Q2_time_before;
         
         proc_time = in_Q2_time_after - start_time;
-        digit = (int)proc_time;
-        char str_digit[8];
-        sprintf(str_digit, "%d", digit);
-        for (int i=0; i<8-strlen(str_digit); i++) {
-            printf("0");
-        }
-        printf("%.3fms: ", proc_time);
+        print_time(proc_time);
         
         //print time(p? leaves Q2, time in Q2 = ?ms)
         printf("P%d leaves Q2, time in Q2 = %.3fms\n", packet->index, in_Q2_time);
@@ -514,12 +451,7 @@ void *server2_proc(){
         //////////////////////////    time    //////////////////////////
         //print time(????????:???ms:)
         proc_time = in_S2_time_before - start_time;
-        digit = (int)proc_time;
-        sprintf(str_digit, "%d", digit);
-        for (int i=0; i<8-strlen(str_digit); i++) {
-            printf("0");
-        }
-        printf("%.3fms: ", proc_time);
+        print_time(proc_time);
         
         //print time(p? begins service at S2, requesting ?msm of service)
         printf("p%d begins service at S2, requesting %dms of service\n", packet->index, (int)(packet->S_time_read));
@@ -540,12 +472,7 @@ void *server2_proc(){
         //////////////////////////    time    //////////////////////////
         //print time(????????:???ms:)
         proc_time = in_S2_time_after - start_time;
-        digit = (int)proc_time;
-        sprintf(str_digit, "%d", digit);
-        for (int i=0; i<8-strlen(str_digit); i++) {
-            printf("0");
-        }
-        printf("%.3fms: ", proc_time);
+        print_time(proc_time);
         
         printf("p%d departs from S2, service time = %.3fms, time in system = %.3fms\n", packet->index, packet->S_time, packet->time_in_system);
         total_num_packet_served++;
@@ -665,7 +592,8 @@ int main (int argc, char *argv[])
     }
     
     //default value of parameters
-    if (fp == NULL) {
+    if (num_file == 0) {
+        printf("default mode\n");
         if (num_lambda == 0)
             lambda = 1.00 *1000;
         if (num_mu == 0)
@@ -687,17 +615,16 @@ int main (int argc, char *argv[])
             r = 1.5;
         if (num_B == 0)
             B = 10;
-//        fclose(fp);
     }
     
     printf("Emulation Parameters:\n");
     printf("    number to arrive = %d\n", num);
-//    printf("    lambda = %.2f\n", lambda);
-    printf("    lambda = %d\n", lambda);
+    printf("    lambda = %.2f\n", lambda);
+//    printf("    lambda = %d\n", lambda);
+    printf("    mu = %.2f\n", mu);
 //    printf("    mu = %d\n", mu);
-    printf("    mu = %d\n", mu);
-//    printf("    r = %.2f\n", r);
-    printf("    r = %d\n", r);
+    printf("    r = %.2f\n", r);
+//    printf("    r = %d\n", r);
     printf("    P = %d\n", P);
     printf("    B = %d\n", B);
     if (fp != NULL) {
