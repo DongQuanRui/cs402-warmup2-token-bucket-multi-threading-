@@ -33,6 +33,9 @@ int total_num_packets_to_serve = 0;
 int not_stop = 1;
 FILE *fp = NULL;
 
+//create 4 threads
+pthread_t packet_thread, token_thread, server1_thread, server2_thread;
+
 pthread_mutex_t IOlock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t Q_not_empty = PTHREAD_COND_INITIALIZER;
 
@@ -72,13 +75,13 @@ double *backup_storage;
 int size = 20;
 
 void create_storage(int size){
-    backup_storage = (double *)malloc((size/2) * sizeof(double));
-    for (int i=0; i<size/2; i++) {
+    backup_storage = (double *)malloc((size-20) * sizeof(double));
+    for (int i=0; i<(size-20); i++) {
         backup_storage[i] = storage[i];
     }
     free(storage);
     storage = (double *)malloc(size * sizeof(double));
-    for (int i=0; i<size/2; i++) {
+    for (int i=0; i<(size-20); i++) {
         storage[i] = backup_storage[i];
     }
     free(backup_storage);
@@ -108,14 +111,14 @@ void statstics(){
     
     unsigned int diff_sqrt_sum = 0;
     for (int i=0; i<total_num_packets_served; i++) {
-//        printf("%.2f\n", storage[i]);
+        //        printf("%.2f\n", storage[i]);
         diff_sqrt_sum += abs((storage[i] - average_time_in_system) * (storage[i] - average_time_in_system));
     }
-//    printf("    diff_sqrt_sum = %d\n\n", diff_sqrt_sum);
+    //    printf("    diff_sqrt_sum = %d\n\n", diff_sqrt_sum);
     printf("    standard deviation for time spent in system = %.6f\n\n", sqrt(diff_sqrt_sum / total_num_packets_served));
     
-    printf("    token drop probability = %.2f\n", ((double)num_token_dropped / (double)total_num_token * 100));
-    printf("    packet drop probability = %.2f\n", ((double)num_packets_dropped / (double)total_num_packets_arrived * 100));
+    printf("    token drop probability = %.2f\n", ((double)num_token_dropped / (double)total_num_token));
+    printf("    packet drop probability = %.2f\n", ((double)num_packets_dropped / (double)total_num_packets_arrived));
 }
 
 void print_time(double proc_time){
@@ -135,37 +138,63 @@ void *packet_proc(void *fp)
     double inter_arrival_time = 0;
     
     //loop
-//    while (not_stop) {
-    for (total_num_packets_arrived; total_num_packets_arrived <= num; ) {
-//        printf("Hello\n");
+    for (; total_num_packets_arrived < num; ) {
         ///////////////////////////////    Q1    ///////////////////////////////
         //read info from file
         if (num_file == 1) {
-            fscanf(fp, "%lf %d %lf", &lambda, &P, &mu);
+            ////
+            char buffer[1024];
+            fgets(buffer, sizeof(buffer), fp);
+//            printf("%s", buffer);
+            char *start_ptr = buffer;
+            char *seperate_ptr = strchr(start_ptr, ' ');
+            if (seperate_ptr != NULL) {
+                *seperate_ptr++ = '\0';
+            }
+            lambda = 1 / atof(start_ptr);
+//            printf("lambda = %f     ", lambda);
+            
+            while (*seperate_ptr == ' ') {
+                seperate_ptr++;
+            }
+            start_ptr = seperate_ptr;
+            seperate_ptr = strchr(start_ptr, ' ');
+            if (seperate_ptr != NULL) {
+                *seperate_ptr++ = '\0';
+            }
+            P = atoi(start_ptr);
+//            printf("P = %d     ", P);
+            
+            while (*seperate_ptr == ' ') {
+                seperate_ptr++;
+            }
+            start_ptr = seperate_ptr;
+            mu = 1 / atof(start_ptr);
+//            printf("mu = %f\n", mu);
+            /////////////////////
+//            fscanf(fp, "%lf %d %lf", &lambda, &P, &mu);
             total_num_packets_arrived++;
-//            printf("lambda = %.3f, P = %d, mu= %.3f\n", lambda, P, mu);
         }else{
             total_num_packets_arrived++;
             if (total_num_packets_arrived == 1) {
-                lambda = lambda * 1000;
-                mu = mu * 1000;
+                lambda = (1 / lambda) * 1000;
+                mu = (1 / mu) * 1000;
             }
         }
         
         if (total_num_packets_arrived <= num) {
-//            printf("total num packets arrived: %d   num: %d\n", total_num_packets_arrived , num);
+            //            printf("total num packets arrived: %d   num: %d\n", total_num_packets_arrived , num);
             //sleep for an interval rate = lambda
             usleep(lambda * 1000);
             
             //wake up, create a packet object
-            pthread_mutex_lock(&IOlock);
             packetElem *packet = (packetElem *)malloc(sizeof(packetElem));
-//            printf("Packet created!\n");
             
             packet->index = total_num_packets_arrived;
             packet->token_required = P;
             packet->S_time_read = mu;
             
+            pthread_mutex_lock(&IOlock);
             //////////////////////////    time    //////////////////////////
             //print time (????????:???ms: )
             inter_arrival_time_after = get_wall_time();
@@ -200,10 +229,10 @@ void *packet_proc(void *fp)
                 num_packets_dropped++;
                 //////////////////////////    time    //////////////////////////
             }
+            pthread_mutex_unlock(&IOlock);
             packet = NULL;
             free(packet);
-            pthread_mutex_unlock(&IOlock);
-//        }
+            
             ///////////////////////////////    Q1    ///////////////////////////////
             
             ///////////////////////////////    Q1->Q2    ///////////////////////////////
@@ -219,10 +248,11 @@ void *packet_proc(void *fp)
                 continue;
             }
             
-//            packetElem *packet = (packetElem *)(temp->obj);
+            //packetElem *packet = (packetElem *)(temp->obj);
             packet = (packetElem *)(temp->obj);
             if (packet->token_required <= token) {
                 My402ListUnlink(&Q1, temp);
+                free(temp);
                 token = token - packet->token_required;
                 
                 //////////////////////////    time    //////////////////////////
@@ -275,7 +305,7 @@ void *token_proc()
     while (not_stop) {
         ///////////////////////////////    token    ///////////////////////////////
         //sleep for an interval (rate r)
-        usleep(r * 1000000);
+        usleep((1 / r) * 1000000);
         
         //wake up and create a token
         pthread_mutex_lock(&IOlock);
@@ -333,9 +363,9 @@ void *token_proc()
             
             //print time(p? leaves Q1, time in Q1 = ?ms, token bucket now has ? token)
             if (token <= 1) {
-                printf("P%d leaves Q1, time in Q1 = %.3fms, token bucket now has %d token\n", packet->index, in_Q1_time, token);
+                printf("p%d leaves Q1, time in Q1 = %.3fms, token bucket now has %d token\n", packet->index, in_Q1_time, token);
             }else{
-                printf("P%d leaves Q1, time in Q1 = %.3fms, token bucket now has %d tokens\n", packet->index, in_Q1_time, token);
+                printf("p%d leaves Q1, time in Q1 = %.3fms, token bucket now has %d tokens\n", packet->index, in_Q1_time, token);
             }
             packet->Q1_time = in_Q1_time;
             //////////////////////////    time    //////////////////////////
@@ -385,6 +415,7 @@ void *server_proc(void *i){
         
         packetElem *packet = (packetElem *)(temp->obj);
         My402ListUnlink(&Q2, temp);
+        free(temp);
         
         //////////////////////////    time    //////////////////////////
         //print time(????????:???ms: )
@@ -395,7 +426,7 @@ void *server_proc(void *i){
         print_time(proc_time);
         
         //print time(p? leaves Q2, time in Q2 = ?ms)
-        printf("P%d leaves Q2, time in Q2 = %.3fms\n", packet->index, in_Q2_time);
+        printf("p%d leaves Q2, time in Q2 = %.3fms\n", packet->index, in_Q2_time);
         packet->Q2_time = in_Q2_time;
         //////////////////////////    time    //////////////////////////
         
@@ -445,7 +476,7 @@ void *server_proc(void *i){
         total_num_packets_served++;
         //////////////////////////    time    //////////////////////////
         
-        if (total_num_packets_served < size) {
+        if (total_num_packets_served <= size) {
             storage[total_num_packets_served-1] = packet->time_in_system;
         }else{
             size = size + 20;
@@ -454,9 +485,9 @@ void *server_proc(void *i){
         }
         
         //termination condition
-//        printf("In S1/S2, total num packets served is: %d, total num packet to serve is: %d\n", total_num_packets_served, total_num_packets_to_serve);
+        //        printf("In S1/S2, total num packets served is: %d, total num packet to serve is: %d\n", total_num_packets_served, total_num_packets_to_serve);
         if (total_num_packets_served == total_num_packets_to_serve) {
-//            printf("server1 prepare to terminate\n");
+            //            printf("server1 prepare to terminate\n");
             not_stop = 0;
             pthread_cond_signal(&Q_not_empty);
             pthread_mutex_unlock(&IOlock);
@@ -569,7 +600,7 @@ int main (int argc, char *argv[])
     printf("Emulation Parameters:\n");
     //default value of parameters
     if (num_file == 0) {
-//        printf("default mode\n");
+        //        printf("default mode\n");
         if (num_num == 0)
             num = 20;
         printf("    number to arrive = %d\n", num);
@@ -594,10 +625,11 @@ int main (int argc, char *argv[])
         total_num_packets_to_serve = num;
     }else{
         //read file
-        fscanf(fp, "%d", &num);
+        char buffer[1024];
+        fgets(buffer, sizeof(buffer), fp);
+        num = atoi(buffer);
         total_num_packets_to_serve = num;
         printf("    number to arrive = %d\n", num);
-//        printf("num of packet read is: %d\n", num);
         if (num_r == 0)
             r = 1.5;
         printf("    r = %.2f\n", r);
@@ -605,7 +637,7 @@ int main (int argc, char *argv[])
             B = 10;
         printf("    B = %d\n", B);
     }
-
+    
     if (num_file == 1) {
         printf("    tsfile = %s\n", filename);
     }
@@ -615,9 +647,9 @@ int main (int argc, char *argv[])
     memset(&Q1, 0, sizeof(My402List));
     memset(&Q2, 0, sizeof(My402List));
     (void)My402ListInit(&Q1);
-    My402ListInit(&Q2);
+    (void)My402ListInit(&Q2);
     storage = (double *)malloc(size * sizeof(double));
-    
+
     //Emulation begin
     start_time = get_wall_time();
     proc_time = start_time - start_time;
@@ -629,9 +661,6 @@ int main (int argc, char *argv[])
     }
     printf("%.3fms: emulation begins\n", proc_time);
     
-    //create 4 threads
-    pthread_t packet_thread, token_thread, server1_thread, server2_thread;
-
     //packet arrival thread
     pthread_create(&packet_thread, NULL, packet_proc, (void *) fp);
     //token deposting thread
@@ -642,18 +671,18 @@ int main (int argc, char *argv[])
     
     ////////////////////////////////////////////////////////////////////////////////////
     //wait for thread to end
-//    if(pthread_join(packet_thread, NULL) == 0){
-//        printf("packet thread terminates\n");
-//    }
-//    if(pthread_join(token_thread, NULL) == 0){
-//        printf("token thread terminates\n");
-//    }
-//    if (pthread_join(server1_thread, NULL) == 0) {
-//        printf("server1 terminates\n");
-//    }
-//    if (pthread_join(server2_thread, NULL) == 0) {
-//        printf("server2 terminates\n");
-//    }
+    //    if(pthread_join(packet_thread, NULL) == 0){
+    //        printf("packet thread terminates\n");
+    //    }
+    //    if(pthread_join(token_thread, NULL) == 0){
+    //        printf("token thread terminates\n");
+    //    }
+    //    if (pthread_join(server1_thread, NULL) == 0) {
+    //        printf("server1 terminates\n");
+    //    }
+    //    if (pthread_join(server2_thread, NULL) == 0) {
+    //        printf("server2 terminates\n");
+    //    }
     pthread_join(packet_thread, NULL);
     pthread_join(token_thread, NULL);
     pthread_join(server1_thread, NULL);
@@ -667,8 +696,16 @@ int main (int argc, char *argv[])
     statstics();
     
     //clean up memory
+    if (My402ListEmpty(&Q1)) {
+        My402ListUnlinkAll(&Q1);
+    }
+    if (My402ListEmpty(&Q2)) {
+        My402ListUnlinkAll(&Q2);
+    }
+    
     free(storage);
     return 0;
 }
+
 
 
