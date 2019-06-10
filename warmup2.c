@@ -13,7 +13,7 @@
 typedef struct tagPacket{
     int index;
     int token_required;
-    int S_time_read;
+    double S_time_read;
     
     double Q1_time;
     double Q2_time;
@@ -106,8 +106,8 @@ void statstics(){
         printf("    average packet inter-arrival time = %.6g\n", ((sum_inter_arrival_time / 1000) / total_num_packets_arrived));
     }
     
-    if (total_num_packets_arrived == 0) {
-        printf("    average packet service time = N/A, no packet arrived at this facility\n");
+    if (total_num_packets_served == 0) {
+        printf("    average packet service time = N/A, no packet is served at this facility\n\n");
     }else{
         printf("    average packet service time = %.6g\n\n", ((sum_service_time / 1000) / total_num_packets_served));
     }
@@ -118,19 +118,19 @@ void statstics(){
     printf("    average number of packets at S2 = %.6g\n\n", (avg_num_at_S2 / end_time));
     
     double average_time_in_system = (sum_time_in_system / 1000) / total_num_packets_served;
-    printf("    average time a packet spent in system = %.6g\n", average_time_in_system);
+    if (total_num_packets_served == 0) {
+        printf("    average time a packet spent in system = N/A, no packet spent time in the system\n");
+    }else{
+        printf("    average time a packet spent in system = %.6g\n", average_time_in_system);
+    }
     
-    if (total_num_packets_arrived == 0) {
-        printf("    standard deviation for time spent in system = N/A, no packet arrived at this facility\n\n");
+    if (total_num_packets_served == 0) {
+        printf("    standard deviation for time spent in system = N/A, no packet spent time at this facility\n\n");
     }else{
         double diff_sqrt_sum = 0;
         for (int i=0; i<total_num_packets_served; i++) {
-//            printf("storage [%d] is %.2f     ", i, storage[i]);
-//            printf("the %dth diff is %.6g     ", i, (storage[i] - average_time_in_system) * (storage[i] - average_time_in_system));
             diff_sqrt_sum += ((storage[i] - average_time_in_system) * (storage[i] - average_time_in_system));
-//            printf("diff_sqrt = %.6g\n", diff_sqrt_sum);
         }
-        //    printf("    diff_sqrt_sum = %d\n\n", diff_sqrt_sum);
         printf("    standard deviation for time spent in system = %.6g\n\n", sqrt(diff_sqrt_sum / total_num_packets_served));
     }
     
@@ -196,7 +196,6 @@ void *packet_proc(void *fp)
             start_ptr = seperate_ptr;
             mu = atof(start_ptr);
             
-//            fscanf(fp, "%lf %d %lf", &lambda, &P, &mu);
             total_num_packets_arrived++;
         }else{
             total_num_packets_arrived++;
@@ -209,7 +208,9 @@ void *packet_proc(void *fp)
         if (total_num_packets_arrived <= num) {
 //            printf("total num packets arrived: %d   num: %d\n", total_num_packets_arrived , num);
             //sleep for an interval rate = lambda
+//            pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, 0);
             usleep(lambda * 1000);
+//            pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, 0);
             
             //wake up, create a packet object
             pthread_mutex_lock(&IOlock);
@@ -247,7 +248,6 @@ void *packet_proc(void *fp)
                 proc_time = in_Q1_time_before - start_time;
                 print_time(proc_time);
                 printf("p%d enters Q1\n", total_num_packets_arrived);
-//                total_num_packets_to_serve++;
             }else{//if packet is dropped
                 //print time (, dropped)
                 printf(", dropped\n");
@@ -255,7 +255,6 @@ void *packet_proc(void *fp)
                 num_packets_dropped++;
                 //////////////////////////    time    //////////////////////////
             }
-//            printf("In packet proc, num packets to serve is: %d\n", total_num_packets_to_serve);
             packet = NULL;
             free(packet);
             pthread_mutex_unlock(&IOlock);
@@ -334,7 +333,9 @@ void *token_proc()
     while (not_stop) {
         ///////////////////////////////    token    ///////////////////////////////
         //sleep for an interval (rate r)
+//        pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, 0);
         usleep((1 / r) * 1000000);
+//        pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, 0);
         
         //wake up and create a token
         pthread_mutex_lock(&IOlock);
@@ -461,7 +462,7 @@ void *server_proc(void *i){
         //////////////////////////    time    //////////////////////////
         //print time(????????:???ms: )
         in_Q2_time_after = get_wall_time();
-        in_Q2_time = in_Q2_time_after - in_Q2_time_before;
+        in_Q2_time = in_Q2_time_after - packet->Q2_time;//in_Q2_time_before;
         
         proc_time = in_Q2_time_after - start_time;
         print_time(proc_time);
@@ -482,14 +483,19 @@ void *server_proc(void *i){
         print_time(proc_time);
         
         //print time(p? enters S1 or S2)
-        printf("p%d begins service at S%d, requesting %dms of service\n", packet->index, (int)i, (int)(packet->S_time_read));
+//        printf("S time read is %.2f\n", packet->S_time_read);
+        printf("p%d begins service at S%d, requesting %dms of service\n", packet->index, (int)i, round(packet->S_time_read));
         //////////////////////////    time    //////////////////////////
         
         pthread_mutex_unlock(&IOlock);
         ///////////////////////////////    before in S    ///////////////////////////////
         
         //sleep (served in S)
+//        pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, 0);
+//        pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, 0);
         usleep(1000 * packet->S_time_read);
+//        pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, 0);
+//        pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, 0);
         
         ///////////////////////////////    Q2->S1    ///////////////////////////////
         pthread_mutex_lock(&IOlock);
@@ -538,13 +544,6 @@ void *server_proc(void *i){
                 break;
             }
         }
-//        if (total_num_packets_served == total_num_packets_to_serve) {
-//            //            printf("server1 prepare to terminate\n");
-//            not_stop = 0;
-////            pthread_cond_signal(&Q_not_empty);
-//            pthread_mutex_unlock(&IOlock);
-//            break;
-//        }
         pthread_mutex_unlock(&IOlock);
         ///////////////////////////////    Q2->S1    ///////////////////////////////
     }
@@ -554,24 +553,24 @@ void *server_proc(void *i){
 void *signal_handler(){
     int sig;
     sigwait(&set, &sig);
-//    printf("sig = %d\n", sig);
     if (sig == 2) {
         printf("SIGINT caught, no new packets or tokens will be allowed\n");
         pthread_cancel(packet_thread);
         pthread_cancel(token_thread);
         while (!My402ListEmpty(&Q1)) {
             My402ListElem *temp = My402ListLast(&Q1);
+            proc_time = get_wall_time() - start_time;
+            print_time(proc_time);
             printf("p%d removed from Q1\n", ((packetElem *)(temp->obj))->index);
             My402ListUnlink(&Q1, temp);
-//            free(temp);
         }
         while (!My402ListEmpty(&Q2)) {
             My402ListElem *temp = My402ListLast(&Q2);
+            proc_time = get_wall_time() - start_time;
+            print_time(proc_time);
             printf("p%d removed from Q2\n", ((packetElem *)(temp->obj))->index);
             My402ListUnlink(&Q2, temp);
-//            free(temp);
         }
-        
     }
     
     pthread_mutex_lock(&IOlock);
@@ -586,8 +585,7 @@ void *signal_handler(){
 static
 void Usage()
 {
-    fprintf(stderr,
-            "Usage: warmup2 [-lambda lambda] [-mu mu] [-r r] [-B B] [-P P] [-n n] [-t tsfile]\n");
+    fprintf(stderr, "Usage: warmup2 [-lambda lambda] [-mu mu] [-r r] [-B B] [-P P] [-n n] [-t tsfile]\n");
     exit(-1);
 }
 
@@ -714,27 +712,23 @@ int main (int argc, char *argv[])
         if (num_num == 0)
             num = 20;
         printf("    number to arrive = %d\n", num);
-        if (num_lambda == 0){
+        if (num_lambda == 0)
             lambda = 1;
-            printf("    lambda = %.2f\n", lambda);
-        }
-        if (num_mu == 0){
+        printf("    lambda = %.2f\n", lambda);
+        if (num_mu == 0)
             mu = 0.35;
-            printf("    mu = %.2f\n", mu);
-        }
+        printf("    mu = %.2f\n", mu);
         if (num_r == 0)
             r = 1.5;
         printf("    r = %.2f\n", r);
         if (num_B == 0)
             B = 10;
         printf("    B = %d\n", B);
-        if (num_P == 0){
+        if (num_P == 0)
             P = 3;
-            printf("    P = %d\n", P);
-        }
+        printf("    P = %d\n", P);
         total_num_packets_to_serve = num;
     }else{
-        
         //read file
         char buffer[1024];
         fgets(buffer, sizeof(buffer), fp);
